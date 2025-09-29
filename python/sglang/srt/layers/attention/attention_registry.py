@@ -165,7 +165,7 @@ def create_hybrid_linear_attn_backend(runner):
             FlashAttentionBackend,
         )
         from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
-            MinimaxHybridLinearAttnBackend,
+            HybridLinearAttnBackend,
             LightningBackend,
         )
         full_attn_backend = FlashAttentionBackend(runner)
@@ -176,7 +176,7 @@ def create_hybrid_linear_attn_backend(runner):
             i for i, attn_type in enumerate(runner.model_config.hf_config.attn_type_list)
             if attn_type == 1
         ]
-        return MinimaxHybridLinearAttnBackend(
+        return HybridLinearAttnBackend(
             full_attn_backend, linear_attn_backend, full_attn_layers
         )
     elif runner.is_hybrid_gdn:

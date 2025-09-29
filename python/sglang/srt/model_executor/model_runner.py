@@ -1626,7 +1626,6 @@ class ModelRunner:
                     device=self.device,
                     state_dtype=self.kv_cache_dtype,
                     state_shape=cache_shape,
-                    speculative_num_draft_tokens=self.server_args.speculative_num_draft_tokens,
                     enable_memory_saver=self.server_args.enable_memory_saver,
                     minimax_layers=linear_layer_ids,
                 )

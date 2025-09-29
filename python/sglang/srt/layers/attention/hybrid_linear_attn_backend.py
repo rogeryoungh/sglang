@@ -382,10 +382,6 @@ class LightningBackend(AttentionBackend):
 
 
 class HybridLinearAttnBackend(AttentionBackend):
-    pass
-
-
-class MinimaxHybridLinearAttnBackend(AttentionBackend):
     """Support different backends for prefill and decode."""
 
     def __init__(
@@ -394,7 +390,6 @@ class MinimaxHybridLinearAttnBackend(AttentionBackend):
         linear_attn_backend: AttentionBackend,
         full_attn_layers: list[int],
     ):
-        # logger.info(f"full_attn_layers: {full_attn_layers}")
         self.full_attn_layers = full_attn_layers
         self.attn_backend_list = [full_attn_backend, linear_attn_backend]
 
@@ -526,3 +521,39 @@ class MinimaxHybridLinearAttnBackend(AttentionBackend):
                 save_kv_cache=save_kv_cache,
                 **kwargs,
             )
+
+    def update_mamba_state_after_mtp_verify(self, accepted_length, model):
+        request_number = accepted_length.shape[0]
+
+        state_indices_tensor = self.attn_backend_list[
+            1
+        ].forward_metadata.mamba_cache_indices[:request_number]
+
+        mamba_caches = self.attn_backend_list[
+            1
+        ].req_to_token_pool.get_mamba_params_all_layers()
+
+        (
+            conv_states,
+            ssm_states,
+            intermediate_state_cache,
+            intermediate_conv_window_cache,
+        ) = mamba_caches
+
+        # SSM state updates (chunked to reduce peak memory)
+        valid_mask = accepted_length > 0
+
+        # Compute common indices once to avoid duplication
+        last_steps_all = (accepted_length - 1).to(torch.int64)
+        valid_state_indices = state_indices_tensor[valid_mask].to(torch.int64)  # [N]
+        last_steps = last_steps_all[valid_mask].to(torch.int64)  # [N]
+
+        # scatter into ssm_states at the chosen cache lines
+        ssm_states[:, valid_state_indices, :] = intermediate_state_cache[
+            :, valid_state_indices, last_steps
+        ].to(ssm_states.dtype, copy=False)
+
+        # Scatter into conv_states at the chosen cache lines
+        conv_states[:, valid_state_indices, :, :] = intermediate_conv_window_cache[
+            :, valid_state_indices, last_steps
+        ].to(conv_states.dtype, copy=False)

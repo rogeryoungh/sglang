@@ -119,7 +119,6 @@ class MinimaxCachePool:
         num_linear_layers: int,
         state_shape: Tuple[int, int],  # (D, D)
         device: str,
-        speculative_num_draft_tokens: Optional[int] = None,
     ):
         state = torch.zeros(
             size=(num_linear_layers, size + 1) + state_shape,
@@ -127,36 +126,12 @@ class MinimaxCachePool:
             device=device,
         )
 
-        if speculative_num_draft_tokens is not None:
-            intermediate_state_cache = torch.zeros(
-                size=(
-                    num_linear_layers,
-                    size + 1,
-                    speculative_num_draft_tokens,
-                    state_shape[0],
-                    state_shape[1],
-                    state_shape[2],
-                ),
-                dtype=state_dtype,
-                device="cuda",
-            )
-            self.minimax_cache = (
-                state,
-                intermediate_state_cache
-            )
-            logger.info(
-                f"[MinimaxCachePool] Allocated. "
-                f"state: L={num_linear_layers}, slots={size}, D={state_shape[0]}x{state_shape[1]}, "
-                f"state size={get_tensor_size_bytes(state) / GB:.2f} GB",
-                f"intermediate_state_cache size={get_tensor_size_bytes(intermediate_state_cache) / GB:.2f} GB"
-            )
-        else:
-            self.minimax_cache = (state,)
-            logger.info(
-                f"[MinimaxCachePool] Allocated. "
-                f"state: L={num_linear_layers}, slots={size}, D={state_shape[0]}x{state_shape[1]}, "
-                f"state size={get_tensor_size_bytes(state) / GB:.2f} GB"
-            )
+        self.minimax_cache = (state,)
+        logger.info(
+            f"[MinimaxCachePool] Allocated. "
+            f"state: L={num_linear_layers}, slots={size}, D={state_shape[0]}x{state_shape[1]}x{state_shape[2]}, "
+            f"state size={get_tensor_size_bytes(state) / GB:.2f} GB"
+        )
         self.size = size
         self.free_slots = list(range(size))
         self.mem_usage = self.get_minimax_size() / GB
@@ -206,8 +181,7 @@ class MinimaxReqToTokenPool(ReqToTokenPool):
         enable_memory_saver: bool,
         state_dtype: torch.dtype,
         minimax_layers: List[int],
-        state_shape: Tuple[int, int],  # (D, D)
-        speculative_num_draft_tokens: int,
+        state_shape: Tuple[int, int, int],  # (D, D)
     ):
         super().__init__(
             size=size,
@@ -222,7 +196,6 @@ class MinimaxReqToTokenPool(ReqToTokenPool):
             num_linear_layers=len(minimax_layers),
             state_shape=state_shape,
             device=device,
-            speculative_num_draft_tokens=speculative_num_draft_tokens,
         )
 
         self.minimax_map = { layer_id: i for i, layer_id in enumerate(minimax_layers) }
