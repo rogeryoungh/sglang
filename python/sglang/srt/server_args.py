@@ -328,6 +328,7 @@ class ServerArgs:
     # Mamba cache
     max_mamba_cache_size: Optional[int] = None
     mamba_ssm_dtype: str = "float32"
+    max_minimax_cache_size: Optional[int] = None
 
     # Hierarchical cache
     enable_hierarchical_cache: bool = False
@@ -2159,6 +2160,12 @@ class ServerArgs:
             default=ServerArgs.mamba_ssm_dtype,
             choices=["float32", "bfloat16"],
             help="The data type of the SSM states in mamba cache.",
+        )
+        parser.add_argument(
+            "--max-minimax-cache-size",
+            type=int,
+            default=ServerArgs.max_minimax_cache_size,
+            help="The maximum size of the minimax cache.",
         )
 
         # Hierarchical cache

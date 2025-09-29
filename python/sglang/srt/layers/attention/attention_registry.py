@@ -160,33 +160,53 @@ def create_dual_chunk_flash_attn_backend(runner):
 
 @register_attention_backend("hybrid_linear_attn")
 def create_hybrid_linear_attn_backend(runner):
-    assert (
-        runner.is_hybrid_gdn
-    ), "hybrid_linear_attn backend can only be used with hybrid GDN models."
-    from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
-        HybridLinearAttnBackend,
-        MambaAttnBackend,
-    )
-    from sglang.srt.utils import is_blackwell, is_npu
-
-    if is_npu():
-        from sglang.srt.layers.attention.ascend_backend import AscendAttnBackend
-
-        full_attn_backend = AscendAttnBackend(runner)
-    elif is_blackwell():
-        from sglang.srt.layers.attention.triton_backend import TritonAttnBackend
-
-        full_attn_backend = TritonAttnBackend(runner)
-    else:
+    if runner.is_hybrid_minimax:
         from sglang.srt.layers.attention.flashattention_backend import (
             FlashAttentionBackend,
         )
-
+        from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+            MinimaxHybridLinearAttnBackend,
+            LightningBackend,
+        )
         full_attn_backend = FlashAttentionBackend(runner)
 
-    linear_attn_backend = MambaAttnBackend(runner)
-    full_attn_layers = runner.model_config.hf_config.full_attention_layer_ids
+        linear_attn_backend = LightningBackend(runner)
+        # full_attn_layers = _minimax_full_attn_layer_ids(runner.model_config)
+        full_attn_layers =  [
+            i for i, attn_type in enumerate(runner.model_config.hf_config.attn_type_list)
+            if attn_type == 1
+        ]
+        return MinimaxHybridLinearAttnBackend(
+            full_attn_backend, linear_attn_backend, full_attn_layers
+        )
+    elif runner.is_hybrid_gdn:
+        assert (
+            runner.is_hybrid_gdn
+        ), "hybrid_linear_attn backend can only be used with hybrid GDN models."
+        from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+            HybridLinearAttnBackend,
+            MambaAttnBackend,
+        )
+        from sglang.srt.utils import is_blackwell, is_npu
 
-    return HybridLinearAttnBackend(
-        full_attn_backend, linear_attn_backend, full_attn_layers
-    )
+        if is_npu():
+            from sglang.srt.layers.attention.ascend_backend import AscendAttnBackend
+
+            full_attn_backend = AscendAttnBackend(runner)
+        elif is_blackwell():
+            from sglang.srt.layers.attention.triton_backend import TritonAttnBackend
+
+            full_attn_backend = TritonAttnBackend(runner)
+        else:
+            from sglang.srt.layers.attention.flashattention_backend import (
+                FlashAttentionBackend,
+            )
+
+            full_attn_backend = FlashAttentionBackend(runner)
+
+        linear_attn_backend = MambaAttnBackend(runner)
+        full_attn_layers = runner.model_config.hf_config.full_attention_layer_ids
+
+        return HybridLinearAttnBackend(
+            full_attn_backend, linear_attn_backend, full_attn_layers
+        )

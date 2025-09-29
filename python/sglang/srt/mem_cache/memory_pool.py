@@ -107,87 +107,68 @@ class ReqToTokenPool:
 
 
 class MambaPool:
+    pass
+
+
+class MinimaxCachePool:
+
     def __init__(
         self,
         size: int,
-        conv_dtype: torch.dtype,
-        ssm_dtype: torch.dtype,
-        num_mamba_layers: int,
-        conv_state_shape: Tuple[int, int],
-        temporal_state_shape: Tuple[int, int],
+        state_dtype: torch.dtype,
+        num_linear_layers: int,
+        state_shape: Tuple[int, int],  # (D, D)
         device: str,
         speculative_num_draft_tokens: Optional[int] = None,
     ):
-        conv_state = torch.zeros(
-            size=(num_mamba_layers, size + 1) + conv_state_shape,
-            dtype=conv_dtype,
+        state = torch.zeros(
+            size=(num_linear_layers, size + 1) + state_shape,
+            dtype=state_dtype,
             device=device,
         )
-        temporal_state = torch.zeros(
-            size=(num_mamba_layers, size + 1) + temporal_state_shape,
-            dtype=ssm_dtype,
-            device=device,
-        )
+
         if speculative_num_draft_tokens is not None:
-            # Cache intermediate SSM states per draft token during target verify
-            # Shape: [num_layers, size + 1, speculative_num_draft_tokens, HV, K, V]
-            intermediate_ssm_state_cache = torch.zeros(
+            intermediate_state_cache = torch.zeros(
                 size=(
-                    num_mamba_layers,
+                    num_linear_layers,
                     size + 1,
                     speculative_num_draft_tokens,
-                    temporal_state_shape[0],
-                    temporal_state_shape[1],
-                    temporal_state_shape[2],
+                    state_shape[0],
+                    state_shape[1],
+                    state_shape[2],
                 ),
-                dtype=ssm_dtype,
+                dtype=state_dtype,
                 device="cuda",
             )
-            # Cache intermediate conv windows (last K-1 inputs) per draft token during target verify
-            # Shape: [num_layers, size + 1, speculative_num_draft_tokens, dim, K-1]
-            intermediate_conv_window_cache = torch.zeros(
-                size=(
-                    num_mamba_layers,
-                    size + 1,
-                    speculative_num_draft_tokens,
-                    conv_state_shape[0],
-                    conv_state_shape[1],
-                ),
-                dtype=conv_dtype,
-                device="cuda",
-            )
-            self.mamba_cache = (
-                conv_state,
-                temporal_state,
-                intermediate_ssm_state_cache,
-                intermediate_conv_window_cache,
+            self.minimax_cache = (
+                state,
+                intermediate_state_cache
             )
             logger.info(
-                f"Mamba Cache is allocated. "
-                f"conv_state size: {get_tensor_size_bytes(conv_state) / GB:.2f}GB, "
-                f"ssm_state size: {get_tensor_size_bytes(temporal_state) / GB:.2f}GB "
-                f"intermediate_ssm_state_cache size: {get_tensor_size_bytes(intermediate_ssm_state_cache) / GB:.2f}GB "
-                f"intermediate_conv_window_cache size: {get_tensor_size_bytes(intermediate_conv_window_cache) / GB:.2f}GB "
+                f"[MinimaxCachePool] Allocated. "
+                f"state: L={num_linear_layers}, slots={size}, D={state_shape[0]}x{state_shape[1]}, "
+                f"state size={get_tensor_size_bytes(state) / GB:.2f} GB",
+                f"intermediate_state_cache size={get_tensor_size_bytes(intermediate_state_cache) / GB:.2f} GB"
             )
         else:
-            self.mamba_cache = (conv_state, temporal_state)
+            self.minimax_cache = (state,)
             logger.info(
-                f"Mamba Cache is allocated. "
-                f"conv_state size: {get_tensor_size_bytes(conv_state) / GB:.2f}GB, "
-                f"ssm_state size: {get_tensor_size_bytes(temporal_state) / GB:.2f}GB "
+                f"[MinimaxCachePool] Allocated. "
+                f"state: L={num_linear_layers}, slots={size}, D={state_shape[0]}x{state_shape[1]}, "
+                f"state size={get_tensor_size_bytes(state) / GB:.2f} GB"
             )
         self.size = size
         self.free_slots = list(range(size))
-        self.mem_usage = self.get_mamba_size() / GB
+        self.mem_usage = self.get_minimax_size() / GB
 
-    def get_mamba_params_all_layers(self):
-        return [self.mamba_cache[i] for i in range(len(self.mamba_cache))]
+    def get_minimax_params_all_layers(self):
+        return [self.minimax_cache[i] for i in range(len(self.minimax_cache))]
 
-    def get_mamba_params(self, layer_id: int):
-        return [self.mamba_cache[i][layer_id] for i in range(len(self.mamba_cache))]
+    def get_minimax_params(self, layer_id: int):
+        return [self.minimax_cache[i][layer_id] for i in range(len(self.minimax_cache))]
 
-    def get_mamba_size(self):
-        return sum(get_tensor_size_bytes(t) for t in self.mamba_cache)
+    def get_minimax_size(self):
+        return sum(get_tensor_size_bytes(t) for t in self.minimax_cache)
 
     def available_size(self):
         return len(self.free_slots)
@@ -206,26 +187,26 @@ class MambaPool:
             self.free_slots.append(free_index)
         else:
             self.free_slots.extend(free_index)
-        self.mamba_cache[0][:, free_index] = self.mamba_cache[1][:, free_index] = 0
+        self.minimax_cache[0][:, free_index] = 0
 
     def clear(self):
         self.free_slots = list(range(self.size))
 
 
 class HybridReqToTokenPool(ReqToTokenPool):
-    """A memory pool that maps a request to its token locations."""
+    pass
 
+
+class MinimaxReqToTokenPool(ReqToTokenPool):
     def __init__(
         self,
         size: int,
         max_context_len: int,
         device: str,
         enable_memory_saver: bool,
-        conv_dtype: torch.dtype,
-        ssm_dtype: torch.dtype,
-        mamba_layers: List[int],
-        conv_state_shape: Tuple[int, int],
-        temporal_state_shape: Tuple[int, int],
+        state_dtype: torch.dtype,
+        minimax_layers: List[int],
+        state_shape: Tuple[int, int],  # (D, D)
         speculative_num_draft_tokens: int,
     ):
         super().__init__(
@@ -235,25 +216,25 @@ class HybridReqToTokenPool(ReqToTokenPool):
             enable_memory_saver=enable_memory_saver,
         )
 
-        self.mamba_pool = MambaPool(
-            size,
-            conv_dtype,
-            ssm_dtype,
-            len(mamba_layers),
-            conv_state_shape,
-            temporal_state_shape,
-            device,
-            speculative_num_draft_tokens,
+        self.minimax_pool = MinimaxCachePool(
+            size=size,
+            state_dtype=state_dtype,
+            num_linear_layers=len(minimax_layers),
+            state_shape=state_shape,
+            device=device,
+            speculative_num_draft_tokens=speculative_num_draft_tokens,
         )
-        self.mamba_map = {layer_id: i for i, layer_id in enumerate(mamba_layers)}
+
+        self.minimax_map = { layer_id: i for i, layer_id in enumerate(minimax_layers) }
 
         self.device = device
-        self.req_index_to_mamba_index_mapping: torch.Tensor = torch.zeros(
+
+        self.req_index_to_minimax_index_mapping: torch.Tensor = torch.zeros(
             size, dtype=torch.int32, device=self.device
         )
 
-        self.rid_to_mamba_index_mapping: Dict[str, int] = {}
-        self.mamba_index_to_rid_mapping: Dict[int, str] = {}
+        self.rid_to_minimax_index_mapping: Dict[str, int] = {}
+        self.minimax_index_to_rid_mapping: Dict[int, str] = {}
 
     # For chunk prefill req, we do not need to allocate mamba cache,
     # We could use allocated mamba cache instead.
@@ -264,51 +245,53 @@ class HybridReqToTokenPool(ReqToTokenPool):
         if select_index == None:
             return None
 
-        mamba_index = []
+        minimax_index = []
         for req in reqs:
             rid = req.rid
-            if rid in self.rid_to_mamba_index_mapping:
-                mid = self.rid_to_mamba_index_mapping[rid]
-            elif (mid := self.mamba_pool.alloc(1)) is not None:
+            if rid in self.rid_to_minimax_index_mapping:
+                mid = self.rid_to_minimax_index_mapping[rid]
+            elif (mid := self.minimax_pool.alloc(1)) is not None:
                 mid = mid[0]
-                self.rid_to_mamba_index_mapping[rid] = mid
-                self.mamba_index_to_rid_mapping[mid] = rid
-            mamba_index.append(mid)
+                self.rid_to_minimax_index_mapping[rid] = mid
+                self.minimax_index_to_rid_mapping[mid] = rid
+            minimax_index.append(mid)
+
         assert len(select_index) == len(
-            mamba_index
-        ), f"Not enough space for mamba cache, try to increase --max-mamba-cache-size."
-        self.req_index_to_mamba_index_mapping[select_index] = torch.tensor(
-            mamba_index, dtype=torch.int32, device=self.device
+            minimax_index
+        ), "Not enough Minimax cache slots. Increase --max-minimax-cache-size."
+
+        self.req_index_to_minimax_index_mapping[select_index] = torch.tensor(
+            minimax_index, dtype=torch.int32, device=self.device
         )
         return select_index
 
-    def get_mamba_indices(self, req_indices: torch.Tensor) -> torch.Tensor:
-        return self.req_index_to_mamba_index_mapping[req_indices]
+    def get_minimax_indices(self, req_indices: torch.Tensor) -> torch.Tensor:
+        return self.req_index_to_minimax_index_mapping[req_indices]
 
-    def get_mamba_params(self, layer_id: int):
-        assert layer_id in self.mamba_map
-        return self.mamba_pool.get_mamba_params(self.mamba_map[layer_id])
+    def get_minimax_params(self, layer_id: int):
+        assert layer_id in self.minimax_map
+        return self.minimax_pool.get_minimax_params(self.minimax_map[layer_id])
 
-    def get_mamba_params_all_layers(self):
-        return self.mamba_pool.get_mamba_params_all_layers()
+    def get_minimax_params_all_layers(self):
+        return self.minimax_pool.get_minimax_params_all_layers()
 
     # For chunk prefill, we can not free mamba cache, we need use it in the future
-    def free(self, free_index: Union[int, List[int]], free_mamba_cache: bool = True):
+    def free(self, free_index: Union[int, List[int]], free_minimax_cache: bool = True):
         super().free(free_index)
-        if free_mamba_cache:
-            mamba_index = self.req_index_to_mamba_index_mapping[free_index]
-            mamba_index_list = mamba_index.tolist()
-            if isinstance(mamba_index_list, int):
-                mamba_index_list = [mamba_index_list]
-            self.mamba_pool.free(mamba_index_list)
-            for mid in mamba_index_list:
-                rid = self.mamba_index_to_rid_mapping[mid]
-                self.mamba_index_to_rid_mapping.pop(mid)
-                self.rid_to_mamba_index_mapping.pop(rid)
+        if free_minimax_cache:
+            minimax_index = self.req_index_to_minimax_index_mapping[free_index]
+            minimax_index_list = minimax_index.tolist()
+            if isinstance(minimax_index_list, int):
+                minimax_index_list = [minimax_index_list]
+            self.minimax_pool.free(minimax_index_list)
+            for mid in minimax_index_list:
+                rid = self.minimax_index_to_rid_mapping[mid]
+                self.minimax_index_to_rid_mapping.pop(mid)
+                self.rid_to_minimax_index_mapping.pop(rid)
 
     def clear(self):
         super().clear()
-        self.mamba_pool.clear()
+        self.minimax_pool.clear()
 
 
 class KVCache(abc.ABC):

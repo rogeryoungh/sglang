@@ -95,6 +95,7 @@ from sglang.srt.mem_cache.memory_pool import (
     HybridReqToTokenPool,
     MHATokenToKVPool,
     MLATokenToKVPool,
+    MinimaxReqToTokenPool,
     ReqToTokenPool,
     SWAKVPool,
 )
@@ -197,6 +198,30 @@ class RankZeroFilter(logging.Filter):
         if record.levelno == logging.INFO:
             return self.is_rank_zero
         return True
+
+
+def _minimax_linear_layer_ids(model_config: ModelConfig):
+    return [
+        i for i, attn_type in enumerate(model_config.hf_config.attn_type_list)
+        if attn_type == 0
+    ]
+
+def _minimax_full_attn_layer_ids(model_config: ModelConfig):
+    return [
+        i for i, attn_type in enumerate(model_config.hf_config.attn_type_list)
+        if attn_type == 1
+    ]
+
+from sglang.srt.distributed import (
+    get_tensor_model_parallel_world_size,
+)
+
+def _minimax_cache_shape(model_config: ModelConfig):
+    return (
+        model_config.num_attention_heads // get_tensor_model_parallel_world_size(),
+        model_config.head_dim,
+        model_config.head_dim,
+    )
 
 
 class ModelRunner:
@@ -357,6 +382,25 @@ class ModelRunner:
                     self.server_args.max_mamba_cache_size = 512
             self.server_args.max_mamba_cache_size = (
                 self.server_args.max_mamba_cache_size
+                // (
+                    self.server_args.dp_size
+                    if self.server_args.enable_dp_attention
+                    else 1
+                )
+            )
+        elif self.is_hybrid_minimax:
+            logger.warning("Hybrid Minimax model detected, disable radix cache")
+            self.server_args.disable_radix_cache = True
+            self.server_args.attention_backend = "hybrid_linear_attn"
+            if self.server_args.max_minimax_cache_size is None:
+                if self.server_args.max_running_requests is not None:
+                    self.server_args.max_minimax_cache_size = (
+                        self.server_args.max_running_requests
+                    )
+                else:
+                    self.server_args.max_minimax_cache_size = 512
+            self.server_args.max_minimax_cache_size = (
+                self.server_args.max_minimax_cache_size
                 // (
                     self.server_args.dp_size
                     if self.server_args.enable_dp_attention
@@ -1258,6 +1302,9 @@ class ModelRunner:
             )
         elif self.is_hybrid_gdn:
             num_layers = len(self.model_config.hf_config.full_attention_layer_ids)
+        elif self.is_hybrid_minimax:
+            full_attention_layer_ids = _minimax_full_attn_layer_ids(self.model_config)
+            num_layers = len(full_attention_layer_ids)
         else:
             num_layers = self.num_effective_layers
         if self.use_mla_backend:
@@ -1277,13 +1324,37 @@ class ModelRunner:
         rest_memory = available_gpu_memory - total_gpu_memory * (
             1 - self.mem_fraction_static
         )
+        logger.info(f"available_gpu_memory: {available_gpu_memory}, total_gpu_memory: {total_gpu_memory}, rest_memory: {rest_memory}")
         if self.is_hybrid_gdn:
             rest_memory -= (
                 self.server_args.max_mamba_cache_size
                 * self.model_config.hf_config.mamba_cache_per_req
                 / (1 << 30)
             )
+        elif self.is_hybrid_minimax:
+            import numpy as np
+            def _minimax_cache_per_req():
+                state_shape = _minimax_cache_shape(self.model_config)
+                state_dtype = self.kv_cache_dtype
+                linear_layers = _minimax_linear_layer_ids(self.model_config)
+                mamba_layers_len = len(linear_layers)
+
+                logger.info(f"state_shape: {state_shape}")
+                logger.info(f"m1: {int(np.prod(state_shape))}, m2: {state_dtype.itemsize}, m3: {mamba_layers_len}")
+
+                return (
+                    int(np.prod(state_shape)) * state_dtype.itemsize
+                ) * mamba_layers_len
+            logger.info(f"max_minimax_cache_size: {self.server_args.max_minimax_cache_size}")
+            logger.info(f"_minimax_cache_per_req: {_minimax_cache_per_req()}")
+            rest_memory -= (
+                self.server_args.max_minimax_cache_size
+                * _minimax_cache_per_req()
+                / (1 << 30)
+            )
+        logger.info(f"final rest_memory: {rest_memory}, cell_size: {cell_size}")
         max_num_token = int(rest_memory * (1 << 30) // cell_size)
+        logger.info(f"max_num_token: {max_num_token}")
         return max_num_token
 
     @property
@@ -1291,6 +1362,13 @@ class ModelRunner:
         return self.model_config.hf_config.architectures[0] in [
             "Qwen3NextForCausalLM",
             "Qwen3NextForCausalLMMTP",
+        ]
+
+    @property
+    def is_hybrid_minimax(self):
+        return self.model_config.hf_config.architectures[0] in [
+            "MiniMaxText01ForCausalLM",
+            "MiniMaxM1ForCausalLM",
         ]
 
     def set_num_token_hybrid(self):
@@ -1411,10 +1489,12 @@ class ModelRunner:
             )
 
         log_info_on_rank0(logger, f"Using KV cache dtype: {self.kv_cache_dtype}")
-
+        
+        logger.info(f"total_gpu_memory: {total_gpu_memory}")
         self.max_total_num_tokens = self.profile_max_num_token(total_gpu_memory)
         if SGLANG_CI_SMALL_KV_SIZE:
             self.max_total_num_tokens = int(SGLANG_CI_SMALL_KV_SIZE)
+        logger.info(f"max_total_num_tokens: {self.max_total_num_tokens}")
 
         if max_num_reqs is None:
             max_num_reqs = min(
@@ -1428,7 +1508,10 @@ class ModelRunner:
             )
         if self.is_hybrid_gdn:
             max_num_reqs = min(max_num_reqs, self.server_args.max_mamba_cache_size)
-
+        elif self.is_hybrid_minimax:
+            max_num_reqs = min(max_num_reqs, self.server_args.max_minimax_cache_size)
+        
+        logger.info(f"max_num_reqs: {max_num_reqs}")
         if self.spec_algorithm.is_eagle() or self.spec_algorithm.is_standalone():
             if self.is_draft_worker:
                 self.max_total_num_tokens = self.server_args.draft_runner_cache_size
@@ -1466,6 +1549,10 @@ class ModelRunner:
             // self.server_args.page_size
             * self.server_args.page_size
         )
+
+        logger.info(f"max_total_num_tokens: {self.max_total_num_tokens}")
+        logger.info(f"page_size: {self.server_args.page_size}")
+
         # different pp rank may have different num of layers, so we need to reduce the max_total_num_tokens
         if self.pp_size > 1:
             tensor = torch.tensor(self.max_total_num_tokens, dtype=torch.int64)
@@ -1527,6 +1614,21 @@ class ModelRunner:
                     ssm_dtype=ssm_dtype,
                     mamba_layers=mamba_layers,
                     speculative_num_draft_tokens=self.server_args.speculative_num_draft_tokens,
+                )
+            elif self.is_hybrid_minimax:
+                config = self.model_config.hf_config
+                linear_layer_ids = _minimax_linear_layer_ids(self.model_config)
+                cache_shape = _minimax_cache_shape(self.model_config)
+                self.req_to_token_pool = MinimaxReqToTokenPool(
+                    size=max_num_reqs,
+                    max_context_len=self.model_config.context_len
+                    + extra_max_context_len,
+                    device=self.device,
+                    state_dtype=self.kv_cache_dtype,
+                    state_shape=cache_shape,
+                    speculative_num_draft_tokens=self.server_args.speculative_num_draft_tokens,
+                    enable_memory_saver=self.server_args.enable_memory_saver,
+                    minimax_layers=linear_layer_ids,
                 )
             else:
                 self.req_to_token_pool = ReqToTokenPool(
@@ -1624,6 +1726,25 @@ class ModelRunner:
                         [0]
                         if self.is_draft_worker
                         else self.model_config.hf_config.full_attention_layer_ids
+                    ),
+                    enable_kvcache_transpose=False,
+                    device=self.device,
+                )
+            elif self.is_hybrid_minimax:
+                full_attention_layer_ids = _minimax_full_attn_layer_ids(self.model_config)
+                self.token_to_kv_pool = HybridLinearKVPool(
+                    page_size=self.page_size if _is_npu else 1,
+                    size=self.max_total_num_tokens,
+                    dtype=self.kv_cache_dtype,
+                    head_num=self.model_config.get_num_kv_heads(
+                        get_attention_tp_size()
+                    ),
+                    head_dim=self.model_config.head_dim,
+                    # if draft worker, we only need 1 attention layer's kv pool
+                    full_attention_layer_ids=(
+                        [0]
+                        if self.is_draft_worker
+                        else full_attention_layer_ids
                     ),
                     enable_kvcache_transpose=False,
                     device=self.device,
