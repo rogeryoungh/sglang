@@ -1335,11 +1335,12 @@ class ModelRunner:
             import numpy as np
             def _minimax_cache_per_req():
                 state_shape = _minimax_cache_shape(self.model_config)
-                state_dtype = self.kv_cache_dtype
+                state_dtype = torch.float32
                 linear_layers = _minimax_linear_layer_ids(self.model_config)
                 mamba_layers_len = len(linear_layers)
 
-                logger.info(f"state_shape: {state_shape}")
+                logger.info(f"rest_memory state_dtype: {state_dtype}, state_shape: {state_shape}")
+
                 logger.info(f"m1: {int(np.prod(state_shape))}, m2: {state_dtype.itemsize}, m3: {mamba_layers_len}")
 
                 return (
@@ -1618,14 +1619,16 @@ class ModelRunner:
             elif self.is_hybrid_minimax:
                 config = self.model_config.hf_config
                 linear_layer_ids = _minimax_linear_layer_ids(self.model_config)
-                cache_shape = _minimax_cache_shape(self.model_config)
+                state_shape = _minimax_cache_shape(self.model_config)
+                state_dtype = torch.float32
+                logger.info(f"MinimaxReqToTokenPool state_dtype: {state_dtype}, state_shape: {state_shape}")
                 self.req_to_token_pool = MinimaxReqToTokenPool(
                     size=max_num_reqs,
                     max_context_len=self.model_config.context_len
                     + extra_max_context_len,
                     device=self.device,
-                    state_dtype=self.kv_cache_dtype,
-                    state_shape=cache_shape,
+                    state_dtype=state_dtype,
+                    state_shape=state_shape,
                     enable_memory_saver=self.server_args.enable_memory_saver,
                     minimax_layers=linear_layer_ids,
                 )
