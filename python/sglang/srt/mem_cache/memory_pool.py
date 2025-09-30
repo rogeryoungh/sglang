@@ -219,7 +219,7 @@ class MinimaxCachePool:
         size: int,
         state_dtype: torch.dtype,
         num_linear_layers: int,
-        state_shape: Tuple[int, int],  # (D, D)
+        state_shape: Tuple[int, int, int],  # (H, D, D)
         device: str,
     ):
         state = torch.zeros(
@@ -378,7 +378,7 @@ class MinimaxReqToTokenPool(ReqToTokenPool):
         enable_memory_saver: bool,
         state_dtype: torch.dtype,
         minimax_layers: List[int],
-        state_shape: Tuple[int, int, int],  # (D, D)
+        state_shape: Tuple[int, int, int],  # (H, D, D)
     ):
         super().__init__(
             size=size,

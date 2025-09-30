@@ -551,7 +551,6 @@ class LightningBackend(AttentionBackend):
         spec_info,
         seq_lens_cpu: Optional[torch.Tensor],
     ):
-        # 处理 padding 请求
         num_padding = torch.count_nonzero(
             seq_lens_cpu == self.get_cuda_graph_seq_len_fill_value()
         )
@@ -576,7 +575,7 @@ class LightningBackend(AttentionBackend):
         )
 
     def get_cuda_graph_seq_len_fill_value(self):
-        return 1  # 和 Qwen3 保持一致
+        return 1
 
     def forward_decode(
         self,
@@ -588,10 +587,6 @@ class LightningBackend(AttentionBackend):
         save_kv_cache: bool = True,
         **kwargs,
     ):
-        """
-        decode 路径：一 token 一 token 追加。
-        直接调用你现有的 linear_decode_forward_triton。
-        """
         layer_id = kwargs["layer_id"]
         slope_rate = kwargs["slope_rate"]
         block_size = kwargs.get("block_size", 32)
@@ -710,18 +705,6 @@ class LightningBackend(AttentionBackend):
 
         hidden = torch.concat(hidden, dim=0).contiguous()
         return hidden
-
-        # # lightning_attention 的输入需要 [B, H, N, D]
-        # # 你的 q,k,v 可能是 [N, H, D] 或 [H, N, D]，请确保在 Layer 侧 reshape 成 [B, H, N, D]
-        # # 这里直接调用
-        # output, updated_state = lightning_attention(
-        #     q, k, v, slope_rate, block_size=block_size,
-        #     kv_history=state[cache_indices]
-        # )
-
-        # # 把最新状态写回 pool
-        # state[cache_indices] = updated_state[:, :, -1, :, :]
-        # return output.reshape(-1, output.shape[-1])
 
     def forward(
         self,
