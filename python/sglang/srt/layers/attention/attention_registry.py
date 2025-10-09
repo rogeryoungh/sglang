@@ -161,21 +161,6 @@ def create_dual_chunk_flash_attn_backend(runner):
 @register_attention_backend("hybrid_linear_attn")
 def create_hybrid_linear_attn_backend(runner):
     if runner.is_hybrid_minimax:
-        from sglang.srt.layers.attention.flashattention_backend import (
-            FlashAttentionBackend,
-        )
-        from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
-            HybridLinearAttnBackend,
-            LightningBackend,
-        )
-        full_attn_backend = FlashAttentionBackend(runner)
-
-        linear_attn_backend = LightningBackend(runner)
-        full_attn_layers = runner.model_config.hf_config.full_attention_layer_ids
-        return HybridLinearAttnBackend(
-            full_attn_backend, linear_attn_backend, full_attn_layers
-        )
-    elif runner.is_hybrid_gdn:
         assert (
             runner.is_hybrid_gdn
         ), "hybrid_linear_attn backend can only be used with hybrid GDN models."
@@ -203,6 +188,22 @@ def create_hybrid_linear_attn_backend(runner):
         linear_attn_backend = MambaAttnBackend(runner)
         full_attn_layers = runner.model_config.hf_config.full_attention_layer_ids
 
+        return HybridLinearAttnBackend(
+            full_attn_backend, linear_attn_backend, full_attn_layers
+        )
+    elif runner.is_hybrid_minimax:
+        from sglang.srt.layers.attention.flashattention_backend import (
+            FlashAttentionBackend,
+        )
+        from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+            HybridLinearAttnBackend,
+            LightningBackend,
+        )
+
+        full_attn_backend = FlashAttentionBackend(runner)
+
+        linear_attn_backend = LightningBackend(runner)
+        full_attn_layers = runner.model_config.hf_config.full_attention_layer_ids
         return HybridLinearAttnBackend(
             full_attn_backend, linear_attn_backend, full_attn_layers
         )

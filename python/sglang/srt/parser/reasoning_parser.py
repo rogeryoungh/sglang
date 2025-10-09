@@ -173,6 +173,7 @@ class Qwen3Detector(BaseReasoningFormatDetector):
             stream_reasoning=stream_reasoning,
         )
 
+
 class MiniMaxM1Detector(BaseReasoningFormatDetector):
     """
     Detector for MiniMax-M1 models (e.g., MiniMax-AI/MiniMax-M1).

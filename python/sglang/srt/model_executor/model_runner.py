@@ -94,8 +94,8 @@ from sglang.srt.mem_cache.memory_pool import (
     HybridLinearKVPool,
     HybridReqToTokenPool,
     MHATokenToKVPool,
-    MLATokenToKVPool,
     MinimaxReqToTokenPool,
+    MLATokenToKVPool,
     ReqToTokenPool,
     SWAKVPool,
 )
@@ -1297,7 +1297,9 @@ class ModelRunner:
         rest_memory = available_gpu_memory - total_gpu_memory * (
             1 - self.mem_fraction_static
         )
-        logger.info(f"available_gpu_memory: {available_gpu_memory}, total_gpu_memory: {total_gpu_memory}, rest_memory: {rest_memory}")
+        logger.info(
+            f"available_gpu_memory: {available_gpu_memory}, total_gpu_memory: {total_gpu_memory}, rest_memory: {rest_memory}"
+        )
         if self.is_hybrid_gdn:
             rest_memory -= (
                 self.server_args.max_mamba_cache_size
@@ -1305,8 +1307,12 @@ class ModelRunner:
                 / (1 << 30)
             )
         elif self.is_hybrid_minimax:
-            logger.info(f"max_minimax_cache_size: {self.server_args.max_minimax_cache_size}")
-            logger.info(f"_minimax_cache_per_req: {self.model_config.hf_config.minimax_cache_per_req}")
+            logger.info(
+                f"max_minimax_cache_size: {self.server_args.max_minimax_cache_size}"
+            )
+            logger.info(
+                f"_minimax_cache_per_req: {self.model_config.hf_config.minimax_cache_per_req}"
+            )
             rest_memory -= (
                 self.server_args.max_minimax_cache_size
                 * self.model_config.hf_config.minimax_cache_per_req
@@ -1449,7 +1455,7 @@ class ModelRunner:
             )
 
         log_info_on_rank0(logger, f"Using KV cache dtype: {self.kv_cache_dtype}")
-        
+
         logger.info(f"total_gpu_memory: {total_gpu_memory}")
         self.max_total_num_tokens = self.profile_max_num_token(total_gpu_memory)
         if SGLANG_CI_SMALL_KV_SIZE:
@@ -1470,7 +1476,7 @@ class ModelRunner:
             max_num_reqs = min(max_num_reqs, self.server_args.max_mamba_cache_size)
         elif self.is_hybrid_minimax:
             max_num_reqs = min(max_num_reqs, self.server_args.max_minimax_cache_size)
-        
+
         logger.info(f"max_num_reqs: {max_num_reqs}")
         if self.spec_algorithm.is_eagle() or self.spec_algorithm.is_standalone():
             if self.is_draft_worker:
@@ -1579,7 +1585,9 @@ class ModelRunner:
                 config = self.model_config.hf_config
                 state_shape = self.model_config.hf_config.state_shape
                 state_dtype = torch.float32
-                logger.info(f"MinimaxReqToTokenPool state_dtype: {state_dtype}, state_shape: {state_shape}")
+                logger.info(
+                    f"MinimaxReqToTokenPool state_dtype: {state_dtype}, state_shape: {state_shape}"
+                )
                 self.req_to_token_pool = MinimaxReqToTokenPool(
                     size=max_num_reqs,
                     max_context_len=self.model_config.context_len

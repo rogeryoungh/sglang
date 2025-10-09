@@ -395,7 +395,7 @@ class MinimaxReqToTokenPool(ReqToTokenPool):
             device=device,
         )
 
-        self.minimax_map = { layer_id: i for i, layer_id in enumerate(linear_layers) }
+        self.minimax_map = {layer_id: i for i, layer_id in enumerate(linear_layers)}
 
         self.device = device
 

@@ -1730,7 +1730,9 @@ class Scheduler(
                     self.chunked_req.req_pool_idx, free_mamba_cache=False
                 )
             elif self.tp_worker.worker.model_runner.is_hybrid_minimax:
-                self.req_to_token_pool.free(self.chunked_req.req_pool_idx, free_minimax_cache=False)
+                self.req_to_token_pool.free(
+                    self.chunked_req.req_pool_idx, free_minimax_cache=False
+                )
             else:
                 self.req_to_token_pool.free(self.chunked_req.req_pool_idx)
         if self.last_batch and self.last_batch.forward_mode.is_extend():

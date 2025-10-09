@@ -2,10 +2,9 @@ from dataclasses import astuple, dataclass
 from functools import lru_cache
 from typing import Optional, Union
 
-from sglang.srt.layers.lightning_attn import lightning_attention, linear_decode_forward_triton
+import einops
 import torch
 import torch.nn.functional as F
-import einops
 
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 from sglang.srt.layers.attention.fla.chunk import chunk_gated_delta_rule
@@ -18,6 +17,10 @@ from sglang.srt.layers.attention.fla.fused_sigmoid_gating_recurrent import (
 from sglang.srt.layers.attention.mamba.causal_conv1d_triton import (
     causal_conv1d_fn,
     causal_conv1d_update,
+)
+from sglang.srt.layers.lightning_attn import (
+    lightning_attention,
+    linear_decode_forward_triton,
 )
 from sglang.srt.layers.radix_attention import RadixAttention
 from sglang.srt.mem_cache.memory_pool import HybridReqToTokenPool, MinimaxReqToTokenPool
@@ -427,6 +430,7 @@ class MambaAttnBackend(AttentionBackend):
 
 class LightningBackend(AttentionBackend):
     """Attention backend using Lightning kernel."""
+
     @staticmethod
     def _get_num_prefills(forward_batch: ForwardBatch):
         if forward_batch.forward_mode.is_extend():
@@ -439,10 +443,13 @@ class LightningBackend(AttentionBackend):
             )
         else:
             return 0
-    
+
     @staticmethod
     def _get_num_prefill_tokens(forward_batch: ForwardBatch):
-        if forward_batch.forward_mode.is_extend() or forward_batch.forward_mode.is_mixed():
+        if (
+            forward_batch.forward_mode.is_extend()
+            or forward_batch.forward_mode.is_mixed()
+        ):
             if forward_batch.extend_num_tokens is not None:
                 return forward_batch.extend_num_tokens
             elif forward_batch.extend_seq_lens is not None:
@@ -590,7 +597,6 @@ class LightningBackend(AttentionBackend):
         layer_id = kwargs["layer_id"]
         slope_rate = kwargs["slope_rate"]
 
-
         num_prefill_tokens = LightningBackend._get_num_prefill_tokens(forward_batch)
         q = q[num_prefill_tokens:].unsqueeze(2).contiguous()
         k = k[num_prefill_tokens:].unsqueeze(2).contiguous()
@@ -603,9 +609,7 @@ class LightningBackend(AttentionBackend):
             "This indicates a bug in the upstream logic that should be investigated."
         )
 
-        hidden = linear_decode_forward_triton(
-            q, k, v, state, slope_rate, slot_id, 32
-        )
+        hidden = linear_decode_forward_triton(q, k, v, state, slope_rate, slot_id, 32)
         return hidden
 
     def forward_extend(
@@ -651,7 +655,6 @@ class LightningBackend(AttentionBackend):
             vs = v[_start:_end].transpose(0, 1).contiguous()
             slice_layer_cache = state[slot_id, ...]
 
-
             def jit_linear_forward_prefix(
                 q: torch.Tensor,
                 k: torch.Tensor,
@@ -679,7 +682,6 @@ class LightningBackend(AttentionBackend):
                 assert output.shape[0] == 1, "batch size must be 1"
                 return einops.rearrange(output.squeeze(0), "h n d -> n (h d)")
 
-
             out_slice = jit_linear_forward_prefix(
                 qs,
                 ks,
@@ -693,7 +695,12 @@ class LightningBackend(AttentionBackend):
         if self._get_num_decode_tokens(forward_batch) > 0:
             hidden.append(
                 self._decode_infer(
-                    q, k, v, state, self.forward_metadata.mamba_cache_indices, forward_batch
+                    q,
+                    k,
+                    v,
+                    state,
+                    self.forward_metadata.mamba_cache_indices,
+                    forward_batch,
                 )
             )
 
@@ -717,9 +724,13 @@ class LightningBackend(AttentionBackend):
         if mode.is_idle():
             return torch.empty_like(q)
         elif mode.is_decode():
-            return self.forward_decode(q, k, v, layer, forward_batch, save_kv_cache, **kwargs)
+            return self.forward_decode(
+                q, k, v, layer, forward_batch, save_kv_cache, **kwargs
+            )
         elif mode.is_extend():
-            return self.forward_extend(q, k, v, layer, forward_batch, save_kv_cache, **kwargs)
+            return self.forward_extend(
+                q, k, v, layer, forward_batch, save_kv_cache, **kwargs
+            )
         else:
             raise ValueError(f"Unsupported forward mode: {mode}")
 

@@ -1,9 +1,8 @@
 """Inference-only MiniMaxText01 model."""
 
 import copy
-import math
 import logging
-
+import math
 from dataclasses import dataclass, fields
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Union
 
@@ -60,7 +59,6 @@ from sglang.srt.models.transformers import maybe_prefix
 from sglang.srt.utils import make_layers
 
 logger = logging.getLogger(__name__)
-
 
 
 def get_num_prefills(forward_batch: ForwardBatch):
@@ -407,7 +405,9 @@ class MiniMaxText01LinearAttention(nn.Module):
         }
 
         hidden = forward_batch.attn_backend.forward(
-            q, k, v,
+            q,
+            k,
+            v,
             layer=None,
             forward_batch=forward_batch,
             **kwargs,
@@ -542,9 +542,7 @@ class MiniMaxText01DecoderLayer(nn.Module):
             head_dim = config.hidden_size // config.num_attention_heads
         max_position_embeddings = config.max_position_embeddings
         if hasattr(config, "max_model_len") and isinstance(config.max_model_len, int):
-            max_position_embeddings = min(
-                max_position_embeddings, config.max_model_len
-            )
+            max_position_embeddings = min(max_position_embeddings, config.max_model_len)
         if config.attention_type == 0:
             use_headxdim = True
             hidden_inner = (
@@ -815,7 +813,6 @@ class MiniMaxText01Model(nn.Module):
             self.norm = PPMissingLayer()
         self.embed_scale = 1.0
         return
-
 
     def forward(
         self,
