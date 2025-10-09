@@ -589,11 +589,9 @@ class LightningBackend(AttentionBackend):
     ):
         layer_id = kwargs["layer_id"]
         slope_rate = kwargs["slope_rate"]
-        block_size = kwargs.get("block_size", 32)
 
 
         num_prefill_tokens = LightningBackend._get_num_prefill_tokens(forward_batch)
-        num_prefills = LightningBackend._get_num_prefills(forward_batch)
         q = q[num_prefill_tokens:].unsqueeze(2).contiguous()
         k = k[num_prefill_tokens:].unsqueeze(2).contiguous()
         v = v[num_prefill_tokens:].unsqueeze(2).contiguous()
@@ -625,7 +623,6 @@ class LightningBackend(AttentionBackend):
         block_size = kwargs.get("BLOCK", 256)
 
         (state,) = self.req_to_token_pool.get_minimax_params(layer_id)
-        cache_indices = self.forward_metadata.mamba_cache_indices
         query_start_loc = self.forward_metadata.query_start_loc
 
         hidden = []
@@ -716,9 +713,6 @@ class LightningBackend(AttentionBackend):
         save_kv_cache: bool = True,
         **kwargs,
     ):
-        """
-        对外统一接口：根据 forward_mode 路由。
-        """
         mode = forward_batch.forward_mode
         if mode.is_idle():
             return torch.empty_like(q)

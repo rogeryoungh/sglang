@@ -377,7 +377,7 @@ class MinimaxReqToTokenPool(ReqToTokenPool):
         device: str,
         enable_memory_saver: bool,
         state_dtype: torch.dtype,
-        minimax_layers: List[int],
+        linear_layers: List[int],
         state_shape: Tuple[int, int, int],  # (H, D, D)
     ):
         super().__init__(
@@ -390,12 +390,12 @@ class MinimaxReqToTokenPool(ReqToTokenPool):
         self.minimax_pool = MinimaxCachePool(
             size=size,
             state_dtype=state_dtype,
-            num_linear_layers=len(minimax_layers),
+            num_linear_layers=len(linear_layers),
             state_shape=state_shape,
             device=device,
         )
 
-        self.minimax_map = { layer_id: i for i, layer_id in enumerate(minimax_layers) }
+        self.minimax_map = { layer_id: i for i, layer_id in enumerate(linear_layers) }
 
         self.device = device
 

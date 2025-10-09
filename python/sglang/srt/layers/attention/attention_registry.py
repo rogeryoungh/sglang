@@ -171,11 +171,7 @@ def create_hybrid_linear_attn_backend(runner):
         full_attn_backend = FlashAttentionBackend(runner)
 
         linear_attn_backend = LightningBackend(runner)
-        # full_attn_layers = _minimax_full_attn_layer_ids(runner.model_config)
-        full_attn_layers =  [
-            i for i, attn_type in enumerate(runner.model_config.hf_config.attn_type_list)
-            if attn_type == 1
-        ]
+        full_attn_layers = runner.model_config.hf_config.full_attention_layer_ids
         return HybridLinearAttnBackend(
             full_attn_backend, linear_attn_backend, full_attn_layers
         )

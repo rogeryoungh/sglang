@@ -200,30 +200,6 @@ class RankZeroFilter(logging.Filter):
         return True
 
 
-def _minimax_linear_layer_ids(model_config: ModelConfig):
-    return [
-        i for i, attn_type in enumerate(model_config.hf_config.attn_type_list)
-        if attn_type == 0
-    ]
-
-def _minimax_full_attn_layer_ids(model_config: ModelConfig):
-    return [
-        i for i, attn_type in enumerate(model_config.hf_config.attn_type_list)
-        if attn_type == 1
-    ]
-
-from sglang.srt.distributed import (
-    get_tensor_model_parallel_world_size,
-)
-
-def _minimax_cache_shape(model_config: ModelConfig):
-    return (
-        model_config.num_attention_heads // get_tensor_model_parallel_world_size(),
-        model_config.head_dim,
-        model_config.head_dim,
-    )
-
-
 class ModelRunner:
     """ModelRunner runs the forward passes of the models."""
 
@@ -1300,11 +1276,8 @@ class ModelRunner:
                 "num_nextn_predict_layers",
                 self.num_effective_layers,
             )
-        elif self.is_hybrid_gdn:
+        elif self.is_hybrid_gdn or self.is_hybrid_minimax:
             num_layers = len(self.model_config.hf_config.full_attention_layer_ids)
-        elif self.is_hybrid_minimax:
-            full_attention_layer_ids = _minimax_full_attn_layer_ids(self.model_config)
-            num_layers = len(full_attention_layer_ids)
         else:
             num_layers = self.num_effective_layers
         if self.use_mla_backend:
@@ -1332,25 +1305,11 @@ class ModelRunner:
                 / (1 << 30)
             )
         elif self.is_hybrid_minimax:
-            import numpy as np
-            def _minimax_cache_per_req():
-                state_shape = _minimax_cache_shape(self.model_config)
-                state_dtype = torch.float32
-                linear_layers = _minimax_linear_layer_ids(self.model_config)
-                mamba_layers_len = len(linear_layers)
-
-                logger.info(f"rest_memory state_dtype: {state_dtype}, state_shape: {state_shape}")
-
-                logger.info(f"m1: {int(np.prod(state_shape))}, m2: {state_dtype.itemsize}, m3: {mamba_layers_len}")
-
-                return (
-                    int(np.prod(state_shape)) * state_dtype.itemsize
-                ) * mamba_layers_len
             logger.info(f"max_minimax_cache_size: {self.server_args.max_minimax_cache_size}")
-            logger.info(f"_minimax_cache_per_req: {_minimax_cache_per_req()}")
+            logger.info(f"_minimax_cache_per_req: {self.model_config.hf_config.minimax_cache_per_req}")
             rest_memory -= (
                 self.server_args.max_minimax_cache_size
-                * _minimax_cache_per_req()
+                * self.model_config.hf_config.minimax_cache_per_req
                 / (1 << 30)
             )
         logger.info(f"final rest_memory: {rest_memory}, cell_size: {cell_size}")
@@ -1618,8 +1577,7 @@ class ModelRunner:
                 )
             elif self.is_hybrid_minimax:
                 config = self.model_config.hf_config
-                linear_layer_ids = _minimax_linear_layer_ids(self.model_config)
-                state_shape = _minimax_cache_shape(self.model_config)
+                state_shape = self.model_config.hf_config.state_shape
                 state_dtype = torch.float32
                 logger.info(f"MinimaxReqToTokenPool state_dtype: {state_dtype}, state_shape: {state_shape}")
                 self.req_to_token_pool = MinimaxReqToTokenPool(
@@ -1630,7 +1588,7 @@ class ModelRunner:
                     state_dtype=state_dtype,
                     state_shape=state_shape,
                     enable_memory_saver=self.server_args.enable_memory_saver,
-                    minimax_layers=linear_layer_ids,
+                    linear_layers=self.model_config.hf_config.linear_layer_ids,
                 )
             else:
                 self.req_to_token_pool = ReqToTokenPool(
@@ -1710,7 +1668,7 @@ class ModelRunner:
                     ),
                     head_dim=self.model_config.head_dim,
                     swa_attention_layer_ids=self.model_config.swa_attention_layer_ids,
-                    full_attention_layer_ids=self.model_config.full_attention_layer_ids,
+                    full_attention_layer_ids=self.model_config.hf_config.full_attention_layer_ids,
                     enable_kvcache_transpose=False,
                     device=self.device,
                 )
@@ -1733,7 +1691,6 @@ class ModelRunner:
                     device=self.device,
                 )
             elif self.is_hybrid_minimax:
-                full_attention_layer_ids = _minimax_full_attn_layer_ids(self.model_config)
                 self.token_to_kv_pool = HybridLinearKVPool(
                     page_size=self.page_size if _is_npu else 1,
                     size=self.max_total_num_tokens,
@@ -1742,12 +1699,7 @@ class ModelRunner:
                         get_attention_tp_size()
                     ),
                     head_dim=self.model_config.head_dim,
-                    # if draft worker, we only need 1 attention layer's kv pool
-                    full_attention_layer_ids=(
-                        [0]
-                        if self.is_draft_worker
-                        else full_attention_layer_ids
-                    ),
+                    full_attention_layer_ids=self.model_config.hf_config.full_attention_layer_ids,
                     enable_kvcache_transpose=False,
                     device=self.device,
                 )
