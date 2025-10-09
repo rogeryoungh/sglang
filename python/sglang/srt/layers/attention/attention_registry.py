@@ -160,7 +160,7 @@ def create_dual_chunk_flash_attn_backend(runner):
 
 @register_attention_backend("hybrid_linear_attn")
 def create_hybrid_linear_attn_backend(runner):
-    if runner.is_hybrid_minimax:
+    if runner.is_hybrid_gdn:
         assert (
             runner.is_hybrid_gdn
         ), "hybrid_linear_attn backend can only be used with hybrid GDN models."

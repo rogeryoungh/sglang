@@ -1676,7 +1676,7 @@ class ModelRunner:
                     ),
                     head_dim=self.model_config.head_dim,
                     swa_attention_layer_ids=self.model_config.swa_attention_layer_ids,
-                    full_attention_layer_ids=self.model_config.hf_config.full_attention_layer_ids,
+                    full_attention_layer_ids=self.model_config.full_attention_layer_ids,
                     enable_kvcache_transpose=False,
                     device=self.device,
                 )
