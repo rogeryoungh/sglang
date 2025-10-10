@@ -836,8 +836,6 @@ class MiniMaxText01Model(nn.Module):
 
         for i in range(len(self.layers)):
             layer = self.layers[i]
-            # print(f"layer {i} attention type: {layer.config.attention_type}")
-            # logger.info(f"layer {i} attention type: {layer}")
             hidden_states, residual = layer(
                 layer_id=i,
                 hidden_states=hidden_states,
@@ -876,8 +874,6 @@ class MiniMaxText01ForCausalLM(nn.Module):
         self.CONCAT_FFN = True
 
         self.unpadded_vocab_size = self.config.vocab_size
-        # if hasattr(vllm_config.model_config, "max_model_len"):
-        #     self.config.max_model_len = vllm_config.model_config.max_model_len
         self.model = MiniMaxText01Model(
             self.config, quant_config, prefix=maybe_prefix(prefix, "model")
         )

@@ -1297,9 +1297,6 @@ class ModelRunner:
         rest_memory = available_gpu_memory - total_gpu_memory * (
             1 - self.mem_fraction_static
         )
-        logger.info(
-            f"available_gpu_memory: {available_gpu_memory}, total_gpu_memory: {total_gpu_memory}, rest_memory: {rest_memory}"
-        )
         if self.is_hybrid_gdn:
             rest_memory -= (
                 self.server_args.max_mamba_cache_size
@@ -1307,20 +1304,12 @@ class ModelRunner:
                 / (1 << 30)
             )
         elif self.is_hybrid_minimax:
-            logger.info(
-                f"max_minimax_cache_size: {self.server_args.max_minimax_cache_size}"
-            )
-            logger.info(
-                f"_minimax_cache_per_req: {self.model_config.hf_config.minimax_cache_per_req}"
-            )
             rest_memory -= (
                 self.server_args.max_minimax_cache_size
                 * self.model_config.hf_config.minimax_cache_per_req
                 / (1 << 30)
             )
-        logger.info(f"final rest_memory: {rest_memory}, cell_size: {cell_size}")
         max_num_token = int(rest_memory * (1 << 30) // cell_size)
-        logger.info(f"max_num_token: {max_num_token}")
         return max_num_token
 
     @property
@@ -1456,11 +1445,9 @@ class ModelRunner:
 
         log_info_on_rank0(logger, f"Using KV cache dtype: {self.kv_cache_dtype}")
 
-        logger.info(f"total_gpu_memory: {total_gpu_memory}")
         self.max_total_num_tokens = self.profile_max_num_token(total_gpu_memory)
         if SGLANG_CI_SMALL_KV_SIZE:
             self.max_total_num_tokens = int(SGLANG_CI_SMALL_KV_SIZE)
-        logger.info(f"max_total_num_tokens: {self.max_total_num_tokens}")
 
         if max_num_reqs is None:
             max_num_reqs = min(
@@ -1477,7 +1464,6 @@ class ModelRunner:
         elif self.is_hybrid_minimax:
             max_num_reqs = min(max_num_reqs, self.server_args.max_minimax_cache_size)
 
-        logger.info(f"max_num_reqs: {max_num_reqs}")
         if self.spec_algorithm.is_eagle() or self.spec_algorithm.is_standalone():
             if self.is_draft_worker:
                 self.max_total_num_tokens = self.server_args.draft_runner_cache_size
@@ -1515,10 +1501,6 @@ class ModelRunner:
             // self.server_args.page_size
             * self.server_args.page_size
         )
-
-        logger.info(f"max_total_num_tokens: {self.max_total_num_tokens}")
-        logger.info(f"page_size: {self.server_args.page_size}")
-
         # different pp rank may have different num of layers, so we need to reduce the max_total_num_tokens
         if self.pp_size > 1:
             tensor = torch.tensor(self.max_total_num_tokens, dtype=torch.int64)
@@ -1585,9 +1567,6 @@ class ModelRunner:
                 config = self.model_config.hf_config
                 state_shape = self.model_config.hf_config.state_shape
                 state_dtype = torch.float32
-                logger.info(
-                    f"MinimaxReqToTokenPool state_dtype: {state_dtype}, state_shape: {state_shape}"
-                )
                 self.req_to_token_pool = MinimaxReqToTokenPool(
                     size=max_num_reqs,
                     max_context_len=self.model_config.context_len
